@@ -130,6 +130,10 @@ def uses_puppeteer(d: Path):
     return pj.exists() and "puppeteer" in pj.read_text()
 
 
+def uses_supervisord(d: Path) -> bool:
+    return (d / "supervisord.conf").exists()
+
+
 # ------------------------------------------------------------------ ports
 def port_free(p: int) -> bool:
     """True if nothing on the host is listening on p (bind to 0.0.0.0, no REUSEADDR)."""
@@ -208,11 +212,29 @@ CMD ["sh", "-c", "{run}"]
         req = "requirements.txt" if (c["dir"] / "requirements.txt").exists() else None
         install = (f"{copy_manifest('requirements.txt')}\nRUN pip install -r requirements.txt"
                    if req else "")
+        if uses_supervisord(c["dir"]):
+            # Patch supervisord.conf at build time: wrap the entry command with debugpy
+            patch = (
+                f"c=open('/app/supervisord.conf').read();"
+                f"c=c.replace('python /app/{entry}','python -m debugpy --listen 0.0.0.0:{dbg} /app/{entry}',1);"
+                f"open('/etc/supervisor/conf.d/supervisord.conf','w').write(c)"
+            )
+            return f"""FROM python:3.12-slim
+WORKDIR {dst}
+RUN apt-get update && apt-get install -y supervisor && rm -rf /var/lib/apt/lists/*
+{install}
+RUN pip install debugpy
+RUN mkdir -p /var/log/supervisor /shared
+COPY {rel if rel != "." else "."} {dst if rel != "." else "./"}
+RUN python3 -c "{patch}"
+EXPOSE {c['port']} {dbg}
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+"""
         return f"""FROM python:3.12-slim
 WORKDIR {dst}
 {install}
 RUN pip install debugpy
-COPY {rel} .
+COPY {rel if rel != "." else "."} .
 EXPOSE {c['port']} {dbg}
 CMD ["python", "-m", "debugpy", "--listen", "0.0.0.0:{dbg}", "{entry}"]
 """
@@ -268,7 +290,7 @@ def launch_cfg(c):
                 "localRoot": local, "remoteRoot": remote, "restart": True,
                 "skipFiles": ["<node_internals>/**"]}
     if lang == "python":
-        return {**base, "type": "debugpy", "connect": {"host": "localhost", "port": dbg},
+        return {**base, "type": "debugpy", "host": "localhost", "port": dbg,
                 "pathMappings": [{"localRoot": local, "remoteRoot": remote}]}
     if lang == "php":
         return {**base, "type": "php", "port": dbg,
