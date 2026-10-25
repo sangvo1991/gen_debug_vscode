@@ -488,9 +488,10 @@ def launch_cfg(c):
     if lang == "java":
         return {**base, "type": "java", "hostName": "localhost", "port": dbg}
     if lang == "go":
-        # remotePath/cwd removed in vscode-go v0.38+; substitutePath is the current API
-        return {**base, "type": "go", "mode": "remote", "host": "localhost",
-                "port": dbg,
+        # debugAdapter=legacy forces JSON-RPC mode (matches dlv exec --headless --api-version=2)
+        # dlv-dap (default in vscode-go >=0.38) only works with `dlv dap` server, not dlv exec
+        return {**base, "type": "go", "mode": "remote", "debugAdapter": "legacy",
+                "host": "localhost", "port": dbg,
                 "substitutePath": [{"from": local, "to": remote.rstrip("/")}]}
     if lang == "ruby":
         return {**base, "type": "rdbg", "debugPort": f"localhost:{dbg}"}
