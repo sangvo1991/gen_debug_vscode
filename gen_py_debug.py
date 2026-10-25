@@ -587,7 +587,7 @@ def nginx_debug_conf(root: Path, nginx_aliases: dict, comps: list) -> str | None
         server_name {hostname};
         location / {{
             proxy_pass http://{svc}:{svc_port};
-            proxy_set_header Host $host;
+            proxy_set_header Host $http_host;
             proxy_set_header X-Real-IP $remote_addr;
         }}
     }}""")
