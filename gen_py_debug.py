@@ -454,7 +454,7 @@ RUN go install github.com/go-delve/delve/cmd/dlv@latest
 COPY {rel} .
 RUN go build -gcflags="all=-N -l" -o /usr/local/bin/server {build_pkg}
 EXPOSE {c['port']} {dbg}
-CMD ["dlv","exec","/usr/local/bin/server","--headless","--listen=:{dbg}","--api-version=2","--accept-multiclient","--continue"]
+CMD ["dlv","exec","/usr/local/bin/server","--headless","--listen=:{dbg}","--api-version=2","--accept-multiclient"]
 """
     if lang == "ruby":
         return f"""FROM ruby:3.3
@@ -642,10 +642,19 @@ def compose(comps, root: Path):
                   f"      - \"{c['host_port']}:{c['port']}\""]
         if c.get("host_dbg"):
             lines.append(f"      - \"127.0.0.1:{c['host_dbg']}:{dbg}\"")
+        if c["lang"] == "go":
+            # dlv needs ptrace to stop/inspect threads; Docker's default seccomp/AppArmor
+            # profiles block this, which otherwise makes breakpoint creation hang.
+            lines += ["    cap_add:", "      - SYS_PTRACE",
+                      "    security_opt:", "      - seccomp:unconfined", "      - apparmor:unconfined"]
         env_block = dict(entrypoint_env)
         env_block.setdefault("PORT", str(c["port"]))  # ensure service listens on the mapped port
         if c["lang"] == "node" and uses_puppeteer(c["dir"]):
             env_block["CHROME_PATH"] = "/usr/bin/chromium-browser"
+        if c["lang"] == "go":
+            # Async preemption can race with dlv's stop-the-world when setting breakpoints
+            # on a live goroutine; disabling it avoids intermittent hangs.
+            env_block["GODEBUG"] = "asyncpreemptoff=1"
         lines.append("    environment:")
         for k, v in env_block.items():
             lines.append(f"      {k}: \"{v}\"")
